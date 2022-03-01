@@ -41,16 +41,41 @@ contract DAO {
   }
 
   constructor(
-    address _address,
+    address _tokenAddress,
     address _chairPerson,
     uint256 _minQuorum,
     uint256 _debathingPeriod
   ) {
     owner = msg.sender;
-    token = IERC20(_address);
+    token = IERC20(_tokenAddress);
     cahairPerson = _chairPerson;
     minQuorum = _minQuorum;
     debathingPeriod = _debathingPeriod;
+    proposalId = 0;
+  }
+
+  function getUserBalance(address _address) public view returns (uint256) {
+    return userBalance[_address];
+  }
+
+  function getProposal(uint256 _id)
+    public
+    view
+    returns (
+      uint256,
+      address,
+      string memory
+    )
+  {
+    return (
+      proposals[_id].timestamp,
+      proposals[_id].recipient,
+      proposals[_id].description
+    );
+  }
+
+  function getProposalsCount() external view returns (uint256) {
+    return proposals.length;
   }
 
   function topUpBalance(uint256 _amount) external returns (uint256) {
