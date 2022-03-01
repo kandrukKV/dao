@@ -10,7 +10,8 @@ contract DAO {
   address public cahairPerson;
   uint256 public minQuorum;
   uint256 public debathingPeriod;
-  uint256 public proposalId;
+  uint256 public proposalCount;
+  uint256 public balance;
 
   event PositiveDecisionProposal(uint256 id, bool success);
 
@@ -26,12 +27,12 @@ contract DAO {
     mapping(address => uint256) votingRegistr;
   }
 
-  Proposal[] public proposals;
+  mapping(uint256 => Proposal) public proposals;
 
   mapping(address => uint256) public userBalance;
 
   modifier onlyTokenholders() {
-    require(userBalance[msg.sender] == 0, "Only tokenholders");
+    require(userBalance[msg.sender] > 0, "Only tokenholders");
     _;
   }
 
@@ -51,7 +52,7 @@ contract DAO {
     cahairPerson = _chairPerson;
     minQuorum = _minQuorum;
     debathingPeriod = _debathingPeriod;
-    proposalId = 0;
+    proposalCount = 0;
   }
 
   function getUserBalance(address _address) public view returns (uint256) {
@@ -63,41 +64,56 @@ contract DAO {
     view
     returns (
       uint256,
+      uint256,
+      uint256,
       address,
       string memory
     )
   {
     return (
       proposals[_id].timestamp,
+      proposals[_id].voteFor,
+      proposals[_id].voteAgainst,
       proposals[_id].recipient,
       proposals[_id].description
     );
   }
 
   function getProposalsCount() external view returns (uint256) {
-    return proposals.length;
+    return proposalCount;
   }
 
   function topUpBalance(uint256 _amount) external returns (uint256) {
     token.transferFrom(msg.sender, address(this), _amount);
     userBalance[msg.sender] += _amount;
+    balance += _amount;
     return userBalance[msg.sender];
   }
 
   function reduceBalance(uint256 _amount) external {
-    bool youCan = true;
-    for (uint256 i; i < proposals.length; i++) {
+    require(
+      _amount <= getUserBalance(msg.sender),
+      "The amount more then balance"
+    );
+    require(!isUserVoting(msg.sender), "Wait for the end of voting");
+
+    // не протестировано
+    token.transferFrom(address(this), msg.sender, _amount);
+    userBalance[msg.sender] -= _amount;
+    balance -= _amount;
+  }
+
+  function isUserVoting(address _address) internal view returns (bool) {
+    uint256 count = 0;
+
+    for (uint256 i = 1; i <= proposalCount; i++) {
       if (
-        !proposals[i].isFinished && proposals[i].votingRegistr[msg.sender] > 0
+        !proposals[i].isFinished && proposals[i].votingRegistr[_address] > 0
       ) {
-        youCan = false;
-        break;
+        count++;
       }
     }
-    if (youCan) {
-      token.transferFrom(address(this), msg.sender, _amount);
-      userBalance[msg.sender] -= _amount;
-    }
+    return count > 0;
   }
 
   function addProposal(
@@ -105,30 +121,33 @@ contract DAO {
     address _recipient,
     string memory _desc
   ) external onlyChairPerson {
-    Proposal storage proposal = proposals[proposalId];
+    proposalCount++;
+
+    Proposal storage proposal = proposals[proposalCount];
 
     proposal.timestamp = block.timestamp;
     proposal.description = _desc;
     proposal.recipient = _recipient;
     proposal.callData = _callData;
-
-    proposalId++;
   }
 
   function vote(uint256 _proposalId, bool supportAgainst)
     external
     onlyTokenholders
   {
+    // несуществующее предложение
+    require(proposals[_proposalId].timestamp != 0, "No proposal");
     // ещё не голосовал
     require(
-      proposals[_proposalId].votingRegistr[msg.sender] == 0,
+      proposals[_proposalId].votingRegistr[msg.sender] ==
+        getUserBalance(msg.sender),
       "Vote is already taken into account"
     );
     // голосование не закончилось
-    require(
-      (block.timestamp - proposals[_proposalId].timestamp) <= debathingPeriod,
-      "Vote is finished"
-    );
+    // require(
+    //   (block.timestamp - proposals[_proposalId].timestamp) > debathingPeriod,
+    //   "Vote is finished"
+    // );
 
     supportAgainst
       ? proposals[_proposalId].voteAgainst += userBalance[msg.sender]
