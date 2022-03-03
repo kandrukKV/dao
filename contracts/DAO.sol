@@ -50,7 +50,7 @@ contract DAO {
     owner = msg.sender;
     token = IERC20(_tokenAddress);
     cahairPerson = _chairPerson;
-    minQuorum = _minQuorum;
+    minQuorum = _minQuorum; // (% от )
     debathingPeriod = _debathingPeriod;
     proposalCount = 0;
   }
@@ -67,6 +67,7 @@ contract DAO {
       uint256,
       uint256,
       address,
+      bool,
       string memory
     )
   {
@@ -75,6 +76,7 @@ contract DAO {
       proposals[_id].voteFor,
       proposals[_id].voteAgainst,
       proposals[_id].recipient,
+      proposals[_id].isFinished,
       proposals[_id].description
     );
   }
@@ -84,6 +86,8 @@ contract DAO {
   }
 
   function topUpBalance(uint256 _amount) external returns (uint256) {
+    require(_amount > 0, "Amount must be mere then zero.");
+    require(!isUserVoting(msg.sender), "This user is voting.");
     token.transferFrom(msg.sender, address(this), _amount);
     userBalance[msg.sender] += _amount;
     balance += _amount;
@@ -97,13 +101,12 @@ contract DAO {
     );
     require(!isUserVoting(msg.sender), "Wait for the end of voting");
 
-    // не протестировано
-    token.transferFrom(address(this), msg.sender, _amount);
     userBalance[msg.sender] -= _amount;
     balance -= _amount;
+    token.transfer(msg.sender, _amount);
   }
 
-  function isUserVoting(address _address) internal view returns (bool) {
+  function isUserVoting(address _address) public view returns (bool) {
     uint256 count = 0;
 
     for (uint256 i = 1; i <= proposalCount; i++) {
@@ -139,15 +142,14 @@ contract DAO {
     require(proposals[_proposalId].timestamp != 0, "No proposal");
     // ещё не голосовал
     require(
-      proposals[_proposalId].votingRegistr[msg.sender] ==
-        getUserBalance(msg.sender),
+      proposals[_proposalId].votingRegistr[msg.sender] == 0,
       "Vote is already taken into account"
     );
-    // голосование не закончилось
-    // require(
-    //   (block.timestamp - proposals[_proposalId].timestamp) > debathingPeriod,
-    //   "Vote is finished"
-    // );
+    // голосование еще не закончилось
+    require(
+      (block.timestamp - proposals[_proposalId].timestamp) < debathingPeriod,
+      "Vote is finished"
+    );
 
     supportAgainst
       ? proposals[_proposalId].voteAgainst += userBalance[msg.sender]
@@ -157,19 +159,22 @@ contract DAO {
   }
 
   function finishProposal(uint256 _proposalId) external {
+    // несуществующее предложение
+    require(proposals[_proposalId].timestamp != 0, "No proposal");
     // голосование еще не было финишировано
     require(proposals[_proposalId].isFinished == false, "Vote is finished");
-
     // голосование закончилось
     require(
-      (block.timestamp - proposals[_proposalId].timestamp) <= debathingPeriod,
+      (block.timestamp - proposals[_proposalId].timestamp) >= debathingPeriod,
       "Voting time isn't up"
     );
 
     proposals[_proposalId].isFinished = true;
 
-    bool quorum = (proposals[_proposalId].voteFor +
-      proposals[_proposalId].voteAgainst) > minQuorum;
+    bool quorum = ((proposals[_proposalId].voteFor +
+      proposals[_proposalId].voteAgainst) * 100) /
+      token.totalSupply() >
+      minQuorum;
 
     if (
       quorum &&
